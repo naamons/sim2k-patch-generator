@@ -40,4 +40,4 @@ input/
 output/
 *.bin
 *.BIN
-!sim2k_db.py
+sim2k_db.py

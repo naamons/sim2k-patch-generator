@@ -13,11 +13,23 @@ import datetime
 import traceback
 from pathlib import Path
 
-from sim2k_db import (
-    LEVEL2_MAP,
-    resolve as resolve_cboot,
-    resolve_overwrite,
-)
+# Optional database — users can generate their own from ECU samples.
+try:
+    from sim2k_db import (
+        LEVEL2_MAP,
+        resolve as resolve_cboot,
+        resolve_overwrite,
+    )
+    _HAS_DB = True
+except ImportError:
+    LEVEL2_MAP = {}
+    _HAS_DB = False
+
+    def resolve_cboot(calibration_ref, bootloader_ref=None):
+        return None, None
+
+    def resolve_overwrite(calibration_ref):
+        return None
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
@@ -554,6 +566,12 @@ class PatchWorker(QThread):
                     f"Expected 0x{config['full_file_size']:X} or 0x{config['container_size']:X}.",
                 )
                 return
+
+            if not _HAS_DB:
+                self.log(
+                    "WARNING: sim2k_db.py not found. "
+                    "Generate it with: python3 generate_db.py /path/to/Hyundai/samples"
+                )
 
             # ------------------------------------------------------------------
             # Segment extraction

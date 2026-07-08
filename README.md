@@ -5,11 +5,10 @@ A PyQt6 desktop tool that generates ECU unlock patches for Hyundai/Kia **SIM2K25
 ## Features
 
 - **One binary in, all files out** — load a boot read binary and get the complete patch set
-- **51 calibrations** built into the database (covers most SIM2K250/SIM2K260 variants)
 - **Auto-detection** of ECU type, calibration reference, and bootloader reference
 - **UDS service 23 → 19** patch for full-flash read on secure-gateway vehicles
 - **Custom password** support to lock out other tuners
-- **Byte-identical output** to reference protected patch files
+- **Byte-identical output** to reference protected patch files (when database is available)
 
 ## Quick Start
 
@@ -17,9 +16,30 @@ A PyQt6 desktop tool that generates ECU unlock patches for Hyundai/Kia **SIM2K25
 # Install dependencies
 pip install PyQt6
 
+# Generate database from your ECU samples (optional, but recommended)
+python3 generate_db.py /path/to/your/Hyundai/samples
+
 # Run the tool
 python3 sim2k_patch_generator.py
 ```
+
+## Database Generation
+
+The tool works best with a database of known CBOOT / level2 / overwrite files. Generate it from your own ECU samples:
+
+```bash
+python3 generate_db.py /path/to/your/samples
+```
+
+The samples directory should contain calibration folders with:
+- **CBOOT subfolders** (e.g. `606A1_C2/`) containing `.bin` and `.level2.bin` files
+- **Overwrite files** (e.g. `606TA051.606A1_C2.bin`)
+
+The script will generate `sim2k_db.py` with all the mappings.
+
+**Without the database**, the tool will still work but:
+- CBOOT / level2 must be provided manually via the override fields
+- Overwrite data will be generated from the ASW hook pattern (stub)
 
 ## Usage
 
@@ -52,16 +72,6 @@ Enter an 8-byte hex password (e.g. `DEADBEEFCAFEBABE`) to lock out other tuners.
 
 The password is written to offset `0x0F4C` in the level2 CBOOT. Other tuners who don't know the password cannot unlock the ECU via OBD.
 
-## Database Coverage
-
-| Bootloader | Calibrations | Unique level2 | Unique overwrites |
-|---|---|---|---|
-| 606A1_C2 | 29 | 3 | 8 |
-| 606Z0_C2 | 15 | 3 | 6 |
-| 606A4_C2 | 5 | 1 | 1 |
-| 606A0_C2 | 2 | 1 | 1 |
-| **Total** | **51** | **8** | **16** |
-
 ## Protected Container Layout (SIM2K250)
 
 | Offset | Size | Content |
@@ -75,6 +85,14 @@ The password is written to offset `0x0F4C` in the level2 CBOOT. Other tuners who
 
 - Python 3.9+
 - PyQt6 >= 6.5.0
+
+## Files
+
+| File | Description |
+|---|---|
+| `sim2k_patch_generator.py` | Main application |
+| `generate_db.py` | Database generator script |
+| `sim2k_db.py` | Generated database (not included, create your own) |
 
 ## License
 

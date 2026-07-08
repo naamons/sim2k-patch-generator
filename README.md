@@ -23,7 +23,7 @@ python3 sim2k_patch_generator.py
 
 ## Usage
 
-1. Click **Browse** and select your boot read binary (e.g. `SXTHNK [Original] ... .bin`)
+1. Click **Browse** and select your boot read binary (e.g. `[Original] ... .bin`)
 2. ECU type auto-detects — leave it on **Auto-detect**
 3. Leave the **UDS service 23 → 19** checkbox enabled (default)
 4. Optionally enter a **custom password** (8 bytes hex) to lock out other tuners

@@ -13,7 +13,13 @@ import datetime
 import traceback
 from pathlib import Path
 
+# Level2 CBOOT generator — generates patched CBOOTs algorithmically from
+# the original, so no pre-built level2 samples are required.
+from clams_level2 import Level2Generator
+
 # Optional database — users can generate their own from ECU samples.
+# This is now only used for CBOOT original resolution and overwrite content;
+# level2 generation no longer depends on it.
 try:
     from sim2k_db import (
         LEVEL2_MAP,
@@ -54,6 +60,7 @@ class ECUConfig:
     PROTECTED_LAYOUTS = {
         "SIM2K250": {
             "cpu": "TC1782",
+            "bootloader_phys": [0x80010000, 0x80020000],
             "method": "overwrite",
             "full_file_size": 0x280000,
             "level2_offset": 0x290000,
@@ -82,6 +89,7 @@ class ECUConfig:
         },
         "SIM2K260": {
             "cpu": "TC1791",
+            "bootloader_phys": [0x80020000],
             "method": "replacement",
             "full_file_size": 0x400000,
             "level2_offset": 0x400000,
@@ -102,6 +110,7 @@ class ECUConfig:
         },
         "SIM2K305": {
             "cpu": "TC1782",
+            "bootloader_phys": [0x80020000],
             "method": "replacement",
             "full_file_size": 0x280000,
             "level2_offset": None,   # SIM2K305 has no separate level2 in the protected file
@@ -695,13 +704,18 @@ class PatchWorker(QThread):
             # Build CBOOT level2.
             self.signals.progress.emit(55, "Building CBOOT level2...")
             if cboot_level2_data:
+                # Use pre-built level2 from database, container, or override.
                 cboot_level2 = bytearray(cboot_level2_data)
+                self.log("Using pre-built level2 CBOOT (from database/container/override)")
+            elif cboot:
+                # Generate level2 algorithmically from the original CBOOT.
+                self.log("Generating level2 CBOOT from original bootloader...")
+                cboot_level2 = bytearray(self._generate_level2(cboot))
             else:
-                # No database/container level2 available; build a placeholder.
-                cboot_level2 = bytearray(self._build_cboot_level2(
-                    cboot or b"\xFF" * config["segments"]["CBOOT"]["length"],
-                    self.cboot_level2_path
-                ))
+                cboot_level2 = bytearray(
+                    b"\xFF" * config["segments"]["CBOOT"]["length"]
+                )
+                self.log("WARNING: no CBOOT available — level2 will be empty filler")
 
             # Apply custom password to level2 CBOOT if provided.
             # Password is stored at offset 0x0F4C (8 bytes).
@@ -773,24 +787,51 @@ class PatchWorker(QThread):
                 pass
         return bytes(patched)
 
-    def _build_cboot_level2(self, cboot_orig, level2_path=None):
-        """
-        Create the level2 CBOOT.  If *level2_path* is supplied, read it;
-        otherwise fall back to the original CBOOT with a log warning that no
-        real level2 patch has been applied.
-        """
-        if level2_path and Path(level2_path).exists():
-            with open(level2_path, "rb") as f:
-                data = f.read()
-            self.log(f"Loaded level2 CBOOT: {level2_path} ({len(data)} bytes)")
-            return bytes(data)
+    def _generate_level2(self, cboot_orig):
+        """Generate a level2 (patched) CBOOT from the original bootloader.
 
-        self.log(
-            "WARNING: no level2 CBOOT patch file supplied; using original CBOOT "
-            "as level2 placeholder.  Real unlock patches need a TriCore-specific "
-            "level2 routine."
+        Uses the algorithmic Level2Generator (clams_level2 module), which
+        reproduces the patch logic from the original SIM2K toolbox:
+        DevMode enable, TesterPresent boost, optional Mode23 extend/replace,
+        and Siemens CRC32 recomputation.
+        """
+        cpu = ECUConfig.get(self.ecu_type).get("cpu", "TC1782")
+        candidates = ECUConfig.get(self.ecu_type).get(
+            "bootloader_phys", [0x80010000]
         )
-        return bytes(cboot_orig)
+        service_patch = self.service_read_patch
+
+        # Try each candidate physical address; use the one whose original CRC
+        # verifies (auto-detection from the CBOOT itself).
+        gen = None
+        for phys in candidates:
+            g = Level2Generator(
+                cboot_orig, phys, cpu=cpu,
+                enable_mode23=service_patch,
+                replace_mode23=service_patch,
+                log=self.log,
+            )
+            if g.verify_original():
+                gen = g
+                self.log(
+                    f"Level2: bootloader physical address auto-detected "
+                    f"as 0x{phys:08X}"
+                )
+                break
+        if gen is None:
+            # Fallback to first candidate — the generator will raise a clear
+            # error if the CRC ranges don't fit.
+            self.log(
+                "WARNING: could not auto-detect bootloader physical address "
+                "from CRC; trying first candidate."
+            )
+            gen = Level2Generator(
+                cboot_orig, candidates[0], cpu=cpu,
+                enable_mode23=service_patch,
+                replace_mode23=service_patch,
+                log=self.log,
+            )
+        return gen.generate()
 
     def _build_container(self, full_data, cboot_orig, cboot_level2, overwrite_bytes):
         """Assemble the protected patch container according to documented layout."""
